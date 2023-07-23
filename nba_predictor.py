@@ -13,18 +13,21 @@ import pandas as pd
 
 
 def get_data():
+    # simply reads the prepared data from a csv file
     df_games = pd.read_csv('data/games_rolling.csv')
     df_games = df_games.select_dtypes(include=['float64', 'int64'])
     return df_games
 
 
 def find_metrics(true, pred):
+    # find the metrics for the binary classification model
+
     # some bitwise operations to find the metrics
-    true_positives = sum(true & pred)
-    false_positives = sum(~true & pred)
-    true_negatives = sum(~true & ~pred)
-    false_negatives = sum(true & ~pred)
-    total = len(true)
+    true_positives = ((true == 1) & (pred == 1)).sum()
+    false_positives = ((true == 0) & (pred == 1)).sum()
+    true_negatives = ((true == 0) & (pred == 0)).sum()
+    false_negatives = ((true == 1) & (pred == 0)).sum()
+    total = true_positives + false_positives + true_negatives + false_negatives
 
     accuracy = (true_positives + true_negatives) / total
     precision = true_positives / (true_positives + false_positives)
@@ -110,7 +113,6 @@ def evaluate(data, model, n_features):
     print_metrics(actual, predicted)
 
 
-# pipeline(get_data(), KNeighborsClassifier(n_jobs=-1), 10)
 def knn_model(features, k=10):
     data = get_data()
     model = KNeighborsClassifier(n_neighbors=k, n_jobs=-1)
@@ -121,3 +123,17 @@ def log_reg_model(features):
     data = get_data()
     model = LogisticRegression(max_iter=1000, n_jobs=-1)
     evaluate(data, model, features)
+
+
+def elo_model():
+    data = get_data()
+    true = data['wl_home']
+    pred = data['elo_home'] + 100 > data['elo_away']
+    print_metrics(true, pred)
+
+
+def base_line():
+    data = get_data()
+    true = data['wl_home']
+    pred = 1
+    print_metrics(true, pred)

@@ -93,7 +93,7 @@ def calculate_rolling(df_games, num_games):
         rolling_cols = [col for col in df.columns if col not in ignored_cols]
 
         # make sure the columns are in the correct order
-        df.sort_values(by='game_date', inplace=True)
+        df = df.sort_values(by='game_date').copy()
 
         # group by team and season, create new df to store averages
         grouped_df = df.groupby(['season_id', 'team_id'])

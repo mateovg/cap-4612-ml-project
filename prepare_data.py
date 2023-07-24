@@ -9,7 +9,6 @@
 import pandas as pd
 import sqlite3
 import elo
-import sys
 
 
 def import_data():
@@ -45,8 +44,7 @@ def calculate_elo(df_games):
     elo_dict = {}
     starting_elo = 1300
 
-    # initialize elo ratings for each team to 1500
-    # should be 1300 but 1500 worked better to match my ratings with 538's
+    # initialize elo ratings for each team to 1300
     for team in df_games['team_name_home'].unique():
         elo_dict[team] = starting_elo
 
@@ -169,7 +167,7 @@ def prepare_data(num_games=5):
 
     # save the data to a csv file
     print('Saving data...')
-    df_games_rolling.to_csv('data/games_rolling.csv', index=False)
+    df_games_rolling.to_csv(f'data/games_rolling_{num_games}.csv', index=False)
 
     rows, cols = df_games.shape
     print(f'Finished! {rows} rows and {cols} columns')

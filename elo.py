@@ -1,6 +1,8 @@
 # functions to calculate each part of the elo formula
 
 def find_K(MOV, elo_diff):
+    # K is multiplier to apply to the elo change
+    # the multiplier function is from 538, as is the k_0 value
     # positive MOV means home team won
     K_0 = 20
     if MOV > 0:

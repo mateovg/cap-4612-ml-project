@@ -10,130 +10,201 @@ from sklearn.neighbors import KNeighborsClassifier
 from sklearn.linear_model import LogisticRegression
 
 import pandas as pd
+from sklearn.tree import DecisionTreeClassifier
+import prepare_data
+
+target_col = 'wl_home'
+ignored_cols = ['season_id', 'team_id_home',
+                'game_id', 'team_id_away', 'wl_home']
 
 
-def get_data():
-    # simply reads the prepared data from a csv file
-    df_games = pd.read_csv('data/games_rolling.csv')
-    df_games = df_games.select_dtypes(include=['float64', 'int64'])
-    return df_games
+class NBAPredictor:
 
+    def __init__(self, num_games, num_features, no_elo=False):
+        self.num_games = num_games
+        self.num_features = num_features
+        self.data = self.get_data()
 
-def find_metrics(true, pred):
-    # find the metrics for the binary classification model
+        self.ignored_cols = ignored_cols
 
-    # some bitwise operations to find the metrics
-    true_positives = ((true == 1) & (pred == 1)).sum()
-    false_positives = ((true == 0) & (pred == 1)).sum()
-    true_negatives = ((true == 0) & (pred == 0)).sum()
-    false_negatives = ((true == 1) & (pred == 0)).sum()
-    total = true_positives + false_positives + true_negatives + false_negatives
+        if no_elo:
+            self.ignored_cols += ['elo_home', 'elo_away']
 
-    accuracy = (true_positives + true_negatives) / total
-    precision = true_positives / (true_positives + false_positives)
-    recall = true_positives / (true_positives + false_negatives)
-    f1 = 2 * precision * recall / (precision + recall)
+        self.feature_cols = self.data.columns[~self.data.columns.isin(
+            self.ignored_cols)]
 
-    return {'accuracy': accuracy, 'precision': precision, 'recall': recall, 'f1': f1}
+        self.best_features = None
+        self.true = self.data[target_col]
+        self.pred = None
+        self.confusion_matrix = None
 
+        self.model = None
 
-def print_metrics(labels, pred):
-    metrics = find_metrics(labels, pred)
-    print(f"Accuracy: {metrics['accuracy']:0.4f}")
-    print(f"Precision: {metrics['precision']:0.4f}")
-    print(f"Recall: {metrics['recall']:0.4f}")
-    print(f"F1 Score: {metrics['f1']:0.4f}")
+        self.info = {
+            'accuracy': 0,
+            'precision': 0,
+            'recall': 0,
+            'f1': 0,
+            'model': self.model,
+            'features': self.best_features,
+            'num_games': num_games,
+            'cm': self.confusion_matrix
+        }
 
+    def get_data(self):
+        # try to open a csv file with the rolling averages if it exists
+        # otherwise, prepare the data
+        try:
+            df_games = pd.read_csv(
+                f'data/games_rolling_{self.num_games}.csv')
+            df_games = df_games.select_dtypes(include=['float64', 'int64'])
+            return df_games
+        except:
+            return self.update_data()
 
-def back_test(data, model, features):
-    # test the model on previous seasons iteratively
-    # each iteration, the model is trained on all previous seasons
-    # and tested on the current season
-    target = 'wl_home'
-    seasons = data['season_id'].unique()
+    def update_data(self):
+        prepare_data.prepare_data(num_games=self.num_games)
+        return self.get_data()
 
-    all_predictions = pd.DataFrame(columns=['actual', 'predicted'])
+    def update_info(self):
+        self.info['model'] = self.model
+        self.info['features'] = self.best_features
+        self.info['num_games'] = self.num_games
+        self.calculate_metrics()
 
-    for i in range(2, len(seasons)):
-        # start on the 3rd season
-        season = seasons[i]
-        train = data[data['season_id'] < season]
-        test = data[data['season_id'] == season]
+    def display_info(self):
+        print("Model Info:")
+        print("-----------")
+        print(f"Model: {self.info['model']}")
+        print(f"Number of Games: {self.info['num_games']}")
+        print(f"Best Features: {', '.join(self.info['features'])}")
+        print("Metrics:")
+        print(f"Accuracy: {self.info['accuracy']:0.4f}")
+        print(f"Precision: {self.info['precision']:0.4f}")
+        print(f"Recall: {self.info['recall']:0.4f}")
+        print(f"F1 Score: {self.info['f1']:0.4f}")
 
-        X_train, y_train = train[features], train[target]
-        X_test, y_test = test[features], test[target]
+    def calculate_metrics(self):
+        # find the metrics for the binary classification model
 
-        model.fit(X_train, y_train)
-        predictions = model.predict(X_test)
+        # some bitwise operations to find the metrics
+        true_positives = ((self.true == 1) & (self.pred == 1)).sum()
+        false_positives = ((self.true == 0) & (self.pred == 1)).sum()
+        true_negatives = ((self.true == 0) & (self.pred == 0)).sum()
+        false_negatives = ((self.true == 1) & (self.pred == 0)).sum()
+        total = true_positives + false_positives + true_negatives + false_negatives
 
-        season_predictions = pd.DataFrame(
-            {'actual': y_test, 'predicted': predictions}
-        )
-        all_predictions = pd.concat([all_predictions, season_predictions])
+        self.confusion_matrix = {
+            'tp': true_positives,
+            'fp': false_positives,
+            'tn': true_negatives,
+            'fn': false_negatives
+        }
 
-    return all_predictions
+        accuracy = (true_positives + true_negatives) / total
+        precision = true_positives / (true_positives + false_positives)
+        recall = true_positives / (true_positives + false_negatives)
+        f1 = 2 * precision * recall / (precision + recall)
 
+        self.info['accuracy'] = accuracy
+        self.info['precision'] = precision
+        self.info['recall'] = recall
+        self.info['f1'] = f1
 
-def find_best_features(data, model, n_features):
-    # find the best features using sequential feature selector
-    ignored_cols = ['season_id', 'team_id_home',
-                    'game_id', 'team_id_away', 'wl_home']
-    feature_cols = data.columns[~data.columns.isin(ignored_cols)]
-    target_col = 'wl_home'
+    def get_metrics(self):
+        self.calculate_metrics()
+        return self.info
 
-    # 5 fold cross validation for time series data
-    split = TimeSeriesSplit(n_splits=5)
-    # finds the best features using sequential feature selector
-    sfs = SequentialFeatureSelector(
-        model, n_features_to_select=n_features, cv=split, n_jobs=-1)
+    def back_test(self):
+        # test the model on previous seasons iteratively
+        # each iteration, the model is trained on all previous seasons
+        # and tested on the current season
+        target = 'wl_home'
+        seasons = self.data['season_id'].unique()
 
-    # Create a copy of the data to avoid modifying the original data
-    data_copy = data.copy()
+        all_predictions = pd.DataFrame(columns=['actual', 'predicted'])
 
-    # Normalize the data using MinMaxScaler
-    scaler = MinMaxScaler()
-    data_copy[feature_cols] = scaler.fit_transform(data_copy[feature_cols])
+        for i in range(2, len(seasons)):
+            # start on the 3rd season
+            season = seasons[i]
+            train = self.data[self.data['season_id'] < season]
+            test = self.data[self.data['season_id'] == season]
 
-    # fit the model
-    sfs.fit(data_copy[feature_cols], data_copy[target_col])
+            X_train, y_train = train[self.best_features], train[target]
+            X_test, y_test = test[self.best_features], test[target]
 
-    return list(feature_cols[sfs.get_support()])
+            self.model.fit(X_train, y_train)
+            predictions = self.model.predict(X_test)
 
+            season_predictions = pd.DataFrame(
+                {'actual': y_test, 'predicted': predictions}
+            )
+            all_predictions = pd.concat([all_predictions, season_predictions])
 
-def evaluate(data, model, n_features):
-    print(f'Finding best {n_features} features...')
-    best_features = find_best_features(data, model, n_features)
-    print(f'Best features: {best_features}')
+        self.pred = all_predictions['predicted']
+        self.true = all_predictions['actual']
 
-    print('Back testing model...')
-    predictions = back_test(data, model, best_features)
+    def find_best_features(self):
+        split = TimeSeriesSplit(n_splits=10)
+        # finds the best features using sequential feature selector
+        sfs = SequentialFeatureSelector(
+            self.model, n_features_to_select=self.num_features, cv=split, n_jobs=-1)
 
-    print('Metrics:')
-    actual, predicted = predictions['actual'], predictions['predicted']
-    print_metrics(actual, predicted)
+        # Create a copy of the data to avoid modifying the original data
+        data_copy = self.data.copy()
 
+        # Normalize the data using standard scaler
+        scaler = StandardScaler()
+        data_copy[self.feature_cols] = scaler.fit_transform(
+            data_copy[self.feature_cols])
 
-def knn_model(features, k=10):
-    data = get_data()
-    model = KNeighborsClassifier(n_neighbors=k, n_jobs=-1)
-    evaluate(data, model, features)
+        # fit the model
+        sfs.fit(data_copy[self.feature_cols], data_copy[target_col])
 
+        self.best_features = list(self.feature_cols[sfs.get_support()])
 
-def log_reg_model(features):
-    data = get_data()
-    model = LogisticRegression(max_iter=1000, n_jobs=-1)
-    evaluate(data, model, features)
+    def evaluate(self):
+        self.pred = None
+        print(f'Finding best {self.num_features} features...')
+        self.find_best_features()
+        print(f"Best Features: {', '.join(self.best_features)}")
 
+        print('Back testing model...')
+        self.back_test()
 
-def elo_model():
-    data = get_data()
-    true = data['wl_home']
-    pred = data['elo_home'] + 100 > data['elo_away']
-    print_metrics(true, pred)
+        self.update_info()
+        print('Done!')
+        self.display_info()
 
+    def knn_model(self, k=10):
+        print(
+            f'Running knn model with {k} neighbors, {self.num_games} game rolling average, and {self.num_features} features...')
+        self.model = KNeighborsClassifier(n_neighbors=k, n_jobs=-1)
+        self.evaluate()
+        return self.info
 
-def base_line():
-    data = get_data()
-    true = data['wl_home']
-    pred = 1
-    print_metrics(true, pred)
+    def log_reg_model(self):
+        print(
+            f'Running logistic regression model, {self.num_games} game rolling average, and {self.num_features} features...')
+        self.model = LogisticRegression(max_iter=1000, n_jobs=-1)
+        self.evaluate()
+        return self.info
+
+    def base_line(self):
+        self.true = self.data['wl_home']
+        self.pred = self.true.any()
+        self.model = 'baseline'
+        self.best_features = []
+        self.update_info()
+        self.display_info()
+        return self.info
+
+    def elo_model(self, homecourt_adv=100):
+        self.true = self.data['wl_home']
+        self.pred = self.data['elo_home'] + \
+            homecourt_adv > self.data['elo_away']
+        self.model = 'elo'
+        self.best_features = []
+        self.update_info()
+        self.display_info()
+        return self.info
